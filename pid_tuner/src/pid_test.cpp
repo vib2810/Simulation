@@ -10,18 +10,43 @@
 
 using namespace std;
 
-const double kp=2.7657,ki=0.002994,kd=26.6325;
+//square wave
+// const double kp=0.63359,ki=0.00015725,kd=26.3199;
+//not square wave
+// const double kp=0.52732,ki=0.00010767,kd=26.4035;
+//sino wave
+const double kp=2.236,ki=0.0018662,kd=49.3545;
 ros::Publisher pub ;
 ros::Publisher pub2 ;
 // ros::Time start_time,currenttime,pasttime;
 double error, desired=0, current, value , errorprior,d,i=0;
 float countf =300;
+
+// #A function to give a trapezoidal profile to desired velocity
+// # ____________________________________________PEAK
+// # ................/|         |\................
+// # .............../ |         | \ ..............                   
+// # ............../  |         |  \..............
+// # ............./   |         |   \.............
+// # ............/    |         |    \............
+// # .........../     |         |     \...........
+// # <---td--->/<-tr->|<---t--->|<-tr->\..........
+
+// You can specify the profile in trap function using the tr, t, td, and peak values
+
 void trap()
 {
-	countf=countf+0.5;
-	if(countf>400 && countf < 800) desired=0.0375*countf -15;
-	else if(countf>1200) desired = -0.0375*countf+60;
-	if(countf >1600) countf=0; 
+	float tr=800.0;
+    float t=600.0;
+    float td=500.0;
+    float peak=10.0/3.6;
+    float m=peak/(tr);
+
+    countf=countf+1;
+    if(countf>td && countf < (tr+td)) desired=m*countf - m*td;
+    else if(countf>tr+t+td) desired = -m*countf+ (peak+m*(tr+t+td));
+    if(countf >td+2*tr+t) countf=0; 
+    if(desired<0) desired=0;
 }
 void des(const  std_msgs::Int16::ConstPtr& data)
 {
@@ -30,7 +55,7 @@ void des(const  std_msgs::Int16::ConstPtr& data)
 float get_throttle(float vel) //function updated and will now use pid to give throttle
 {
 	current=vel; //a value between 0 and 1023;
-	error=desired-current;
+	error=(desired)-current;
 	d=(error-errorprior) ;
 	i=i+(error);
 	value= (kp*error + ki*i + kd*d);
@@ -48,7 +73,7 @@ void callback_feedback(const nav_msgs::Odometry::ConstPtr& data)
 	// :param yaw [float]
 	// :param vel [float]
 	trap();
-	cout<<"desired"<< desired<< endl;
+	cout<<"desired"<< desired*3.6<< endl;
 	prius_msgs::Control cmd;
 	float x_bot = data->pose.pose.position.x;
 	float y_bot = data->pose.pose.position.y;
@@ -71,7 +96,7 @@ void callback_feedback(const nav_msgs::Odometry::ConstPtr& data)
 	// cout<<"c"<<endl;
 	float vel = (data->twist.twist.linear.x * cos(yaw) + data->twist.twist.linear.y * sin(yaw));
 	if(vel>1) cout<<countf<<endl;
-	cout<< "vel of car"<< vel<< endl;
+	cout<< "vel of car"<< vel*3.6<< endl;
 	float throttle= get_throttle(vel);
 	cout<< "Car throttle: "<< throttle<<endl;
 	if(throttle>=0)
