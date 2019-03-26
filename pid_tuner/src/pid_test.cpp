@@ -11,16 +11,18 @@
 using namespace std;
 
 //square wave
-// const double kp=0.63359,ki=0.00015725,kd=26.3199;
+double kp=0.63359,ki=0.00015725,kd=26.3199;
 //not square wave
-// const double kp=0.52732,ki=0.00010767,kd=26.4035;
+//double kp=0.52732,ki=0.00010767,kd=26.4035;
 //sino wave
-const double kp=2.236,ki=0.0018662,kd=49.3545;
+// double kp=2.236,ki=0.0018662,kd=49.3545;
+double yp = 0.8  ,yi = 0.05 ,yd = 0.5 ,y = 0.8;
 ros::Publisher pub ;
 ros::Publisher pub2 ;
 // ros::Time start_time,currenttime,pasttime;
-double error, desired=0, current, value , errorprior,d,i=0;
-float countf =300;
+double error, desired=0, current, value , errorprior, error_diff=0, error_sum=0;
+double filtered_error, filtered_error_diff, prev_filtered_error;
+float countf =00;
 
 // #A function to give a trapezoidal profile to desired velocity
 // # ____________________________________________PEAK
@@ -39,7 +41,7 @@ void trap()
 	float tr=800.0;
     float t=600.0;
     float td=500.0;
-    float peak=10.0/3.6;
+    float peak=35.0/3.6;
     float m=peak/(tr);
 
     countf=countf+1;
@@ -47,31 +49,81 @@ void trap()
     else if(countf>tr+t+td) desired = -m*countf+ (peak+m*(tr+t+td));
     if(countf >td+2*tr+t) countf=0; 
     if(desired<0) desired=0;
-}
+ }
 void des(const  std_msgs::Int16::ConstPtr& data)
 {
 	desired=data->data;
 }
 float get_throttle(float vel) //function updated and will now use pid to give throttle
 {
-	current=vel; //a value between 0 and 1023;
+	current=vel; 
+
 	error=(desired)-current;
-	d=(error-errorprior) ;
-	i=i+(error);
-	value= (kp*error + ki*i + kd*d);
+	error_diff=(error-errorprior) ;
+	error_sum=error_sum+(error);
 	errorprior=error;
+
+	value= (kp*error + ki*error_sum + kd*error_diff);
 	if(value<=-1) value=-1;
 	if(value>=1) value=1;
 	return value;
 }
+float get_throttle_adap(float vel) //function updated and will now use pid to give throttle
+{
+	current=vel; 
+
+	error=(desired)-current;
+	error_diff=(error-errorprior) ;
+	error_sum=error_sum+(error);
+	errorprior=error;
+	
+	filtered_error = error * (1 - y) + errorprior* y ;
+	filtered_error_diff = filtered_error - prev_filtered_error;
+	prev_filtered_error = filtered_error;
+	
+	kp = kp + yp * fabs(error - filtered_error);
+	ki = ki + yi * filtered_error;
+	kd = kd + yd * fabs(error_diff - filtered_error_diff);
+	if(kp > 2.5)	kp = 2.5;
+	if(kp < 0.3)	kp = 0.3;
+	if(ki > 0.010)      ki = 0.010;
+	if(ki < 0.00001)	ki = 0.00001;
+	if(kd > 30) kd = 30;
+	if(kd < 10)	kd = 10;
+
+	value= (kp*error + ki*error_sum + kd*error_diff);
+	if(value<=-1) value=-1;
+	if(value>=1) value=1;
+	return value;
+
+}
+float get_throttle_mit(float vel) //function updated and will now use pid to give throttle
+{
+	current=vel; 
+
+	error=(desired)-current;
+	error_diff=(error-errorprior) ;
+	error_sum=error_sum+(error);
+	errorprior=error;
+	
+	kp = kp + yp * error * error;
+	ki = ki + yi * error * error_sum;
+	kd = kd + yd * error * error_diff;
+	if(kp > 2.5)	kp = 2.5;
+	if(kp < 0.3)	kp = 0.3;
+	if(ki > 0.010)      ki = 0.010;
+	if(ki < 0.00001)	ki = 0.00001;
+	if(kd > 30) kd = 30;
+	if(kd < 10)	kd = 10;
+
+	value= (kp*error + ki*error_sum + kd*error_diff);
+	if(value<=-1) value=-1;
+	if(value>=1) value=1;
+	return value;
+}
+
 void callback_feedback(const nav_msgs::Odometry::ConstPtr& data)
 {
-	// if(countf%10!=0) return;
-	// Assigns the position of the robot to global variables from odometry.
-	// :param x_bot [float]
-	// :param y_bot [float]
-	// :param yaw [float]
-	// :param vel [float]
 	trap();
 	cout<<"desired"<< desired*3.6<< endl;
 	prius_msgs::Control cmd;
@@ -89,16 +141,11 @@ void callback_feedback(const nav_msgs::Odometry::ConstPtr& data)
 						 data->pose.pose.orientation.z);
 
 	float yaw = atan2(siny, cosy) ;//yaw in radians
-
-	// cout<<"x of car:"<<x_bot<<endl;
-	// cout<<"y of car:"<< y_bot<<endl;
-	// cout<<"angle of car:"<<endl;
-	// cout<<"c"<<endl;
 	float vel = (data->twist.twist.linear.x * cos(yaw) + data->twist.twist.linear.y * sin(yaw));
-	if(vel>1) cout<<countf<<endl;
 	cout<< "vel of car"<< vel*3.6<< endl;
 	float throttle= get_throttle(vel);
 	cout<< "Car throttle: "<< throttle<<endl;
+
 	if(throttle>=0)
 	{
 		cmd.shift_gears=cmd.FORWARD;
